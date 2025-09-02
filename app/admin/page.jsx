@@ -27,7 +27,7 @@ export default function AdminPage() {
   const [description, setDescription] = useState('');
   const [thumbFile, setThumbFile] = useState(null);
 
-  // harmonogram „dni tygodnia” – teraz z zegarem
+  // harmonogram „dni tygodnia” – wygodne wybieraki
   const [entries, setEntries] = useState([]);
   const [day, setDay] = useState('Pon');
   const [start, setStart] = useState('19:00');
@@ -62,7 +62,9 @@ export default function AdminPage() {
 
   // wczytaj listę lokali
   const loadVenues = async () => {
-    const { data } = await supabase.from('venues').select('*').order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('venues').select('*').order('created_at', { ascending: false });
+    if (error) console.error(error);
     setVenues(data || []);
   };
   useEffect(() => { loadVenues(); }, []);
@@ -133,7 +135,7 @@ export default function AdminPage() {
       thumbUrl = data.publicUrl;
     }
 
-    // 2) wstaw do venues
+    // 2) zapis do venues
     const schedule = buildSchedule();
     const { error } = await supabase.from('venues').insert([{
       name, address, phone, email,
@@ -280,7 +282,7 @@ export default function AdminPage() {
                 ))}
               </ul>
             )}
-            <small>Zapisywane jako tekst, np. „Pon 19:00-23:00, Pt 20:00-02:00”.</small>
+            <small>Zapisywane do pola „schedule” jako tekst, np. „Pon 19:00-23:00, Pt 20:00-02:00”.</small>
           </div>
 
           <div>
@@ -315,7 +317,6 @@ export default function AdminPage() {
           <div>
             <button className="btn" type="submit">Zapisz wydarzenie</button>
           </div>
-          <small>To są jednorazowe eventy. Na głównej pokażemy najpierw dzisiejsze/kolejne daty.</small>
         </div>
       </form>
 
