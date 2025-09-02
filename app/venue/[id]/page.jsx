@@ -1,175 +1,154 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { supabase } from '../../../lib/supabase-browser';
-import { computeNextOccurrence, DAY_NAMES, minutesToHuman } from '../../../lib/schedule';
+import '../styles/globals.css'; // ochronnie, gdyby Netlify budował ten plik osobno
+import Countdown from './Countdown';
+import { createClient } from '@supabase/supabase-js';
 
-export default function VenuePage({ params }){
-  const { id } = params;
-  const [venue, setVenue] = useState(null);
-  const [session, setSession] = useState(null);
-  const [comments, setComments] = useState([]);
-  const [ratings, setRatings] = useState([]);
-  const [presenceCount, setPresenceCount] = useState(0);
-  const [error, setError] = useState('');
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
-  const pad = n=>String(n).padStart(2,'0');
+// mapowanie dni PL → indeks (Pon=0 … Nd=6)
+const DAY_INDEX = { 'Pon':0, 'Wt':1, 'Śr':2, 'Sro':2, 'Czw':3, 'Pt':4, 'Sob':5, 'Nd':6, 'Ndz':6 };
+const INDEX_TO_DAY = ['Pon','Wt','Śr','Czw','Pt','Sob','Nd'];
 
-  useEffect(()=>{
-    const run = async()=>{
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      const { data: v, error: e } = await supabase.from('venues').select('*').eq('id', id).single();
-      if(e){ setError('Nie znaleziono lokalu'); return; }
-      setVenue(v);
-
-      await supabase.from('venues').update({ views: (v.views||0)+1 }).eq('id', id);
-
-      const { data: com } = await supabase.from('comments').select('*').eq('venue_id', id).order('created_at', {ascending:false});
-      setComments(com||[]);
-      const { data: rat } = await supabase.from('ratings').select('stars').eq('venue_id', id);
-      setRatings(rat||[]);
-
-      const { data: pres } = await supabase.rpc('presence_count_now', { p_venue: id });
-      setPresenceCount(pres||0);
-    };
-    run();
-  },[id]);
-
-  if(!venue) return <div>Ładowanie…</div>;
-
-  const occ = computeNextOccurrence(venue.schedule, new Date());
+// „Teraz” w strefie Europe/Warsaw (żeby nocne godziny działały poprawnie)
+function nowInWarsaw() {
   const now = new Date();
-  let remaining = 0, canSing = 0, occStr = 'brak danych';
-  if(occ){
-    occStr = `${(occ.status==='ongoing'?'TRWA – ':'')}${(occ.status==='ongoing'||occ.status==='today-upcoming')?'Dziś':DAY_NAMES[occ.day]} ${pad(occ.start.getHours())}:${pad(occ.start.getMinutes())}–${pad(occ.end.getHours())}:${pad(occ.end.getMinutes())}`;
-    if(now>=occ.start && now<=occ.end){
-      remaining = Math.max(0, Math.round((occ.end-now)/60000));
-      canSing = Math.floor(remaining/4);
+  const warsaw = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' }));
+  // getDay: Nd=0…Sob=6 → zamieniamy na Pon=0…Nd=6
+  const dayIndex = (warsaw.getDay() + 6) % 7;
+  const minutes = warsaw.getHours() * 60 + warsaw.getMinutes();
+  return { dayIndex, minutes, warsaw };
+}
+
+// „Pon 19:00-23:00, Pt 20:00-02:00” → [{day,start,end,crosses}]
+function parseSchedule(s) {
+  if (!s) return [];
+  return s.split(',').map(x => x.trim()).map(part => {
+    const m = part.match(/^([A-Za-zĄĆĘŁŃÓŚŹŻąęółńćźż]{2,3})\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/u);
+    if (!m) return null;
+    const dayStr = m[1];
+    const day = DAY_INDEX[dayStr];
+    if (day == null) return null;
+    const [h1, mi1] = m[2].split(':').map(Number);
+    const [h2, mi2] = m[3].split(':').map(Number);
+    let start = h1 * 60 + mi1;
+    let end = h2 * 60 + mi2;
+    let crosses = false;
+    if (end <= start) { end += 1440; crosses = true; } // przez północ
+    return { day, start, end, crosses, raw: part };
+  }).filter(Boolean);
+}
+
+// znajdź aktywną lub najbliższą sesję
+function findCurrentOrNext(sessions, nowDay, nowMin) {
+  // aktywna dziś
+  for (const s of sessions) {
+    if (s.day === nowDay && nowMin >= s.start && nowMin < s.end) {
+      return { status: 'active', minutesLeft: s.end - nowMin, session: s };
     }
   }
-  const ratingAvg = ratings.length? (ratings.reduce((a,b)=>a+b.stars,0)/ratings.length).toFixed(1)+' / 5' : 'brak';
-
-  async function submitOrder(e){
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const title = fd.get('title'), artist = fd.get('artist');
-    if(!session){ alert('Zaloguj się.'); return; }
-    await supabase.from('song_orders').insert({ venue_id: id, user_id: session.user.id, user_email: session.user.email, title, artist });
-    alert('Zamówienie zapisane. Administrator zobaczy je w panelu.');
-  }
-
-  async function imHere(){
-    if(!session){ alert('Zaloguj się.'); return; }
-    await supabase.from('presence_logs').insert({ venue_id:id, user_id:session.user.id });
-    const { data: pres } = await supabase.rpc('presence_count_now', { p_venue: id });
-    setPresenceCount(pres||0);
-  }
-
-  async function rate(e){
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const stars = parseInt(fd.get('stars'),10);
-    const comment = fd.get('comment');
-    if(stars>=1 && stars<=5){
-      const { error } = await supabase.from('ratings').insert({ venue_id:id, user_id: session.user.id, stars });
-      if(!error && comment){
-        await supabase.from('comments').insert({ venue_id:id, user_id: session.user.id, user_email: session.user.email, text:comment });
-      }
-      const { data: rat } = await supabase.from('ratings').select('stars').eq('venue_id', id);
-      setRatings(rat||[]);
-      const { data: com } = await supabase.from('comments').select('*').eq('venue_id', id).order('created_at', {ascending:false});
-      setComments(com||[]);
-      (e.target).reset();
+  // aktywna z dnia poprzedniego, która przeszła przez północ
+  const prevDay = (nowDay + 6) % 7;
+  for (const s of sessions) {
+    if (s.day === prevDay && s.end > 1440 && nowMin < (s.end - 1440)) {
+      return { status: 'active', minutesLeft: (s.end - 1440) - nowMin, session: s };
     }
   }
-
-  function mailPrize(){
-    const sub = encodeURIComponent(`Wygraj nagrodę – ${(session?.user?.email)||'gość'}`);
-    const body = encodeURIComponent(`Użytkownik: ${(session?.user?.email)||'gość'}\nLokal: ${venue.name} (${venue.id})\nData: ${new Date().toLocaleString()}`);
-    window.location.href = `mailto:tchsasport@gmail.com?subject=${sub}&body=${body}`;
+  // najbliższa (w horyzoncie 7 dni)
+  let bestDist = Infinity, best = null;
+  for (const s of sessions) {
+    let dayDelta = s.day - nowDay;
+    if (dayDelta < 0) dayDelta += 7;
+    let dist = dayDelta * 1440 + (s.start - nowMin);
+    if (dist <= 0) dist += 7 * 1440;
+    if (dist < bestDist) { bestDist = dist; best = s; }
   }
+  return { status: 'upcoming', minutesUntil: bestDist, session: best };
+}
+
+function fmtHM(totalMin) {
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}`;
+}
+
+export default async function VenuePage({ params }) {
+  const { data: venue, error } = await supabase
+    .from('venues')
+    .select('*')
+    .eq('id', params.id)
+    .single();
+
+  if (error || !venue) {
+    return (
+      <div className="container">
+        <h1>Nie znaleziono lokalu</h1>
+        <p>Spróbuj wrócić do listy i wybrać inny lokal.</p>
+      </div>
+    );
+  }
+
+  const sessions = parseSchedule(venue.schedule);
+  const { dayIndex, minutes } = nowInWarsaw();
+  const info = sessions.length ? findCurrentOrNext(sessions, dayIndex, minutes) : null;
 
   return (
-    <div className="grid" style={{gridTemplateColumns:'2fr 1fr'}}>
-      <div>
-        <img className="thumb" src={venue.thumb} alt="miniatura" style={{width:'100%',height:220,objectFit:'cover',borderRadius:12}}/>
-        <div className="row" style={{justifyContent:'space-between', marginTop:8}}>
-          <h2 style={{margin:0}}>{venue.name}</h2>
-          <span className="chip">Ocena: {ratingAvg}</span>
-        </div>
-        <div className="muted">{venue.address}</div>
-        <div className="sep"></div>
-        <p>{venue.desc||''}</p>
+    <div className="container">
+      <h1 style={{marginBottom: 8}}>{venue.name}</h1>
+      <div className="row" style={{gap: 12, marginBottom: 12}}>
+        <span className="badge">karaoke</span>
+        <span>{venue.address}</span>
       </div>
-      <div>
-        <div className="card">
-          <div className="row" style={{justifyContent:'space-between'}}>
-            <div><div className="muted">Godziny karaoke (następny termin)</div><div className="value">{occStr}</div></div>
-            <div><div className="muted">Miejsca</div><div className="value">{venue.seats||'-'}</div></div>
-          </div>
-          <div className="row" style={{justifyContent:'space-between'}}>
-            <div><div className="muted">Telefon</div><div className="value">{venue.phone||'-'}</div></div>
-            <div><div className="muted">E-mail</div><div className="value">{venue.email||'-'}</div></div>
-          </div>
-          <div className="row" style={{justifyContent:'space-between'}}>
-            <div><div className="muted">Obecnie na karaoke</div><div className="value">{presenceCount}</div></div>
-          </div>
-        </div>
 
-        <div className="sep"></div>
-        {remaining>0? (
-          <div className="card">
-            <div><strong>Do końca karaoke dziś:</strong> {minutesToHuman(remaining)}</div>
-            <div>Ile piosenek się zmieści (~4 min/utwór): <strong>{canSing}</strong></div>
-          </div>
-        ) : <div className="muted">Karaoke teraz nie trwa.</div>}
+      {venue.thumb && (
+        <img
+          src={venue.thumb}
+          alt={venue.name}
+          style={{width: '100%', maxWidth: 900, borderRadius: 12, marginBottom: 16}}
+        />
+      )}
 
-        <div className="sep"></div>
-        <div className="card">
-          <div className="row" style={{justifyContent:'space-between'}}>
-            <strong>Akcje</strong>
-            <button className="btn" onClick={imHere}>Jestem na karaoke</button>
-          </div>
-          <div className="row" style={{justifyContent:'space-between'}}>
-            <button className="btn btn-primary" onClick={mailPrize}>Wygraj nagrodę</button>
-          </div>
-          <div className="sep"></div>
-          <form onSubmit={submitOrder} className="grid">
-            <div><strong>Zamów piosenkę</strong></div>
-            <div className="row" style={{gap:8}}>
-              <input name="title" placeholder="Tytuł" required/>
-              <input name="artist" placeholder="Wykonawca" required/>
-              <button className="btn btn-primary" type="submit">Wyślij</button>
+      <div className="card" style={{marginBottom: 12}}>
+        <div><strong>Godziny karaoke:</strong> {venue.schedule || 'brak danych'}</div>
+        {info && info.status === 'active' && (
+          <div style={{marginTop: 8}}>
+            <div className="row" style={{gap: 10}}>
+              <span className="badge">TRWA TERAZ</span>
+              <span>
+                Zakończenie: {fmtHM((info.session.end > 1440 ? info.session.end - 1440 : info.session.end))}
+                {' '}({INDEX_TO_DAY[info.session.day]})
+              </span>
             </div>
-            <div className="muted">Zamówienie trafi do panelu administratora.</div>
-          </form>
-        </div>
-
-        <div className="sep"></div>
-        <div>
-          <div className="row" style={{justifyContent:'space-between'}}><strong>Oceny i komentarze</strong><span className="muted">{ratings.length} ocen</span></div>
-          <form onSubmit={rate} className="row" style={{gap:8, marginTop:8}}>
-            <select name="stars" required>
-              <option value="">Ocena (1–5)</option>
-              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
-            </select>
-            <input name="comment" placeholder="Komentarz (opcjonalnie)"/>
-            <button className="btn btn-primary" type="submit">Wyślij</button>
-          </form>
-          <div className="list" style={{marginTop:10}}>
-            {comments.length===0 && <div className="muted">Brak komentarzy.</div>}
-            {comments.map(c=>(
-              <div key={c.id} className="card">
-                <div className="row" style={{justifyContent:'space-between'}}>
-                  <strong>{c.user_email}</strong>
-                  <span className="muted">{new Date(c.created_at).toLocaleString()}</span>
-                </div>
-                <div style={{marginTop:6}}>{c.text}</div>
-              </div>
-            ))}
+            <div style={{marginTop: 8}}>
+              <Countdown initialMinutesLeft={info.minutesLeft} />
+            </div>
           </div>
-        </div>
+        )}
+        {info && info.status === 'upcoming' && info.session && (
+          <div style={{marginTop: 8}}>
+            <div className="row" style={{gap: 10}}>
+              <span className="badge">NAJBLIŻSZE</span>
+              <span>
+                {INDEX_TO_DAY[info.session.day]} {fmtHM(info.session.start)} – {fmtHM(info.session.end > 1440 ? info.session.end - 1440 : info.session.end)}
+              </span>
+              <span>(za ~{Math.floor(info.minutesUntil/60)}h {info.minutesUntil%60}m)</span>
+            </div>
+          </div>
+        )}
+      </div>
 
+      <div className="grid" style={{gap: 12}}>
+        <div className="card">
+          <div><strong>Telefon:</strong> {venue.phone || '—'}</div>
+          <div><strong>E-mail:</strong> {venue.email || '—'}</div>
+          <div><strong>Miejsca siedzące:</strong> {venue.seats ?? '—'}</div>
+        </div>
+        <div className="card">
+          <div><strong>Opis:</strong></div>
+          <p style={{marginTop: 4}}>{venue.desc || '—'}</p>
+        </div>
       </div>
     </div>
   );
