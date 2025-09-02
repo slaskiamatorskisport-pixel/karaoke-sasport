@@ -1,0 +1,30 @@
+:root{
+  --bg:#0f1115;--card:#151927;--text:#e8ecf3;--muted:#97a0b4;--stroke:#23283b;
+  --pri:#6ee7ff;--pri-2:#22d3ee;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--r:18px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif}
+a{color:var(--pri);text-decoration:none}
+a:hover{text-decoration:underline}
+.container{width:min(1100px,92vw);margin:0 auto}
+header{position:sticky;top:0;z-index:40;background:rgba(15,17,21,.7);backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid var(--stroke)}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:14px 0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800}
+.badge{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--pri),var(--pri-2));color:#0b0d12}
+.btn{border:1px solid var(--stroke);background:#111625;color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer;font-weight:700}
+.btn:hover{border-color:#2b3150}
+.btn-primary{border:none;background:linear-gradient(135deg,var(--pri),var(--pri-2));color:#071018}
+.card{background:var(--card);border:1px solid var(--stroke);border-radius:var(--r);padding:12px}
+.grid{display:grid;gap:16px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.muted{color:var(--muted)}
+.headline{font-size:clamp(26px,4vw,40px);font-weight:800}
+.list{display:grid;gap:14px;margin:18px 0 80px}
+.thumb{width:120px;height:84px;object-fit:cover;border-radius:12px}
+.chip{font-size:12px;color:#cbd5e1;border:1px solid #2c3148;padding:4px 8px;border-radius:999px}
+.sep{height:1px;background:#1e2335;margin:8px 0}
+input,textarea,select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--stroke);background:#101524;color:var(--text);outline:none}
+textarea{min-height:100px;resize:vertical}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.center{display:grid;place-items:center;text-align:center}
+.value{font-weight:700}
