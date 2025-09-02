@@ -1,37 +1,44 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase-browser';
 
-export default function LoginPage(){
-  const [email,setEmail]=useState('');
-  const [password,setPassword]=useState('');
-  const [msg,setMsg]=useState('');
+import { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-  useEffect(()=>{
-    // nada
-  },[]);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
-  async function login(e){
+export default function LoginPage() {
+  const [email, setEmail] = useState('sasport@karaoke.local');
+  const [password, setPassword] = useState('Fafrokita85!');
+  const [msg, setMsg] = useState('');
+
+  const onSubmit = async (e) => {
     e.preventDefault();
-    let userEmail = email;
-    if(email.trim().toUpperCase()==='SASPORT'){
-      const adminAlias = process.env.NEXT_PUBLIC_ADMIN_ALIAS_EMAIL || 'sasport@karaoke.local';
-      userEmail = adminAlias;
-    }
-    const { data, error } = await supabase.auth.signInWithPassword({ email: userEmail, password });
-    if(error){ setMsg('Błąd logowania: ' + error.message); return; }
-    setMsg('Zalogowano.'); window.location.href='/';
-  }
+    setMsg('Logowanie…');
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) { setMsg('Błąd: ' + error.message); return; }
+    setMsg('OK. Przechodzę do /admin…');
+    window.location.href = '/admin';
+  };
 
   return (
-    <div style={{maxWidth:480, margin:'0 auto'}}>
-      <h2>Logowanie</h2>
-      <form onSubmit={login} className="grid">
-        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="E-mail lub SASPORT"/>
-        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Hasło"/>
-        <button className="btn btn-primary" type="submit">Zaloguj</button>
+    <div className="container">
+      <h1>Logowanie</h1>
+      <form className="card" onSubmit={onSubmit}>
+        <div className="grid" style={{gap:12}}>
+          <div>
+            <label>E-mail</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required />
+          </div>
+          <div>
+            <label>Hasło</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required />
+          </div>
+          <button className="btn" type="submit">Zaloguj</button>
+          {msg && <small>{msg}</small>}
+        </div>
       </form>
-      {msg && <div className="muted" style={{marginTop:8}}>{msg}</div>}
     </div>
   );
 }
